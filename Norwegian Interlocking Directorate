@@ -1,0 +1,265 @@
+import requests
+from bs4 import BeautifulSoup
+from urllib.request import urlopen      
+import numpy as np
+import csv
+from collections import Counter
+import datetime
+import seaborn as sns
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+%matplotlib inline
+import networkx as nx
+import imageio
+
+###
+SCRAPING AND STORING THE DATA IN ARRAYS
+###
+#PART1 : Creating a list (only) with the links of the files we need to scrape
+
+#pointing to the right home page
+mainpage = requests.get('http://www.boardsandgender.com/data.php').text
+#finding all links
+mainsoup = BeautifulSoup(mainpage, 'lxml')
+mainsoup.find_all()
+
+#creating a list with all the links found on the page
+allLinks = []
+for link in mainsoup.find_all('a', href=True):
+    #print(link['href'])
+    print(link.get('href'))
+    allLinks.append(link.get('href'))
+    
+#creating a list only with the links we need
+collectionLinks1m = []
+collectionLinks2m = []
+for x in allLinks:
+    if x.startswith('data/net1m'):
+        collectionLinks1m.append(x)
+    if x.startswith('data/net2m'):
+        collectionLinks2m.append(x)
+        
+#checking how many links we got , should be 9yrs4months monthly data , (9*12+4)*2=224 in total
+# print(len(collectionLinks1m))
+# print(len(collectionLinks1m)/12)
+# print(len(collectionLinks2m))
+# print(len(collectionLinks2m)/12)
+
+#creating the complete links , together with the prefix of the link
+link_string = 'http://www.boardsandgender.com/'
+completelinksCollection1m = [link_string + x for x in collectionLinks1m]
+# print(completelinksCollection1m[0:10])
+# len(completelinksCollection1m)
+completelinksCollection2m = [link_string + x for x in collectionLinks2m]
+# print(completelinksCollection2m[0:10])
+# len(completelinksCollection2m)
+
+
+###
+#PART2 : Step 2: Looping through all the collected links and extracting data
+#                 into 112+112 arrays and storing them into two lists for further use
+
+#number of months is fixed = 112
+l = 112
+two_mode = [[] for _ in range(l)]
+
+for n in range(0,112):
+    two_mode[n] = np.loadtxt(completelinksCollection2m[n],
+           dtype = np.int32)
+# print(two_mode[0])    
+# print(two_mode[111])
+
+#Saving them into csv's (not to have to scrape it every time):
+with open('onemode.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerows(one_mode)   
+with open('twomode.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerows(two_mode)
+
+
+###
+# Part3: Calculating change in overall number of positions over time
+
+#creating a dataframe 
+df2mode = pd.DataFrame(two_mode)
+#df2mode.head()
+#creating the empty columns for all the 384 companies
+column_names = range(1,385)
+dfDirectorship = pd.DataFrame(columns = column_names)
+
+#extracting the number of positions per company per month 
+for n in range(len(two_mode)):
+    newlst = []
+    for i in range(0,len(two_mode[n].tolist())):
+        newlst.append(two_mode[n].tolist()[i][0])
+        dido = Counter(newlst)
+    dfDirectorship = dfDirectorship.append(dido, ignore_index=True).fillna(0)
+    
+#adding the date index to the dataframe
+idx = pd.date_range("2002-05-01", periods=112, freq="M")
+dfDirectorship.index = idx
+#dfDirectorship.head()
+#dfDirectorship.describe()
+
+#Creating plot with overall positions change
+ax = dfDirectorship.transpose().sum().plot.area(color="steelblue", )
+ax.set_ylabel("Amount of total directorship positions")
+ax.set_xlabel("Time")
+ax.set_ylim(0,2300)
+ax.axvline(pd.to_datetime('2008-01-01'), color='k', linestyle='--', lw=2)
+#ax.grid('on', which='minor', axis='x' )
+
+
+#creating further plots and exploring the data
+#creating plot with percentage change in amount of directorships
+dfDirectorship.transpose().sum().pct_change().plot()
+dfDirectorship.transpose().sum().head()
+sns.heatmap(dfDirectorship.isnull(), cbar=False)
+sns.heatmap(dfDirectorship)
+
+###
+#Part4: Calculations on individual directors changes over time 
+
+#creating a dataframe with all the directors and their amount of positions 
+#first, creatign the empty columns
+column_names = range(1,5768)
+#then creatign the empty data frame
+dfDirectors = pd.DataFrame(columns = column_names)
+
+#populating the dataframe with data
+for n in range(len(two_mode)):
+    newlst1 = []
+    for i in range(0,len(two_mode[n].tolist())):
+        newlst1.append(two_mode[n].tolist()[i][1])
+        dido1 = Counter(newlst1)
+    dfDirectors = dfDirectors.append(dido1, ignore_index=True).fillna(0)
+    
+#giving a daytime index to the dataframe
+dfDirectors.index = idx
+dfDirectors.head()
+#check the data
+dfDirectors.transpose().describe()
+#maximum number of directorships somebody held at each point in time
+dfDirectors.transpose().max().plot()
+dfDirectors.transpose().min().plot()
+dfDirectors.transpose().mean().plot()
+dfDirectors.transpose().median().plot()
+
+#reading in data from the people file
+dfPpl = pd.read_excel('C:/Users/amt/Documents/0. MSc Tinbergen/block 3. research hackathon/norwegian interlocking/people.xlsx')
+dfPpl.index = range(1,5768)
+#extracting the genders
+GenderList = dfPpl.gender
+#GenderList.head()
+
+#creatign a dataframe that also includes the gender
+dfDirectorsG = dfDirectors.append(GenderList)
+#dfDirectorsG.tail()
+
+#checking the accuracy of the data. checking that we get the same thing through this way, too
+ax1 = dfDirectors.transpose().sum().plot.area()
+ax1.set_ylabel("Amount of total directorship positions")
+ax1.set_xlabel("Time")
+ax1.set_ylim(0,2300)
+ax1.axvline(pd.to_datetime('2008-01-01'), color='k', linestyle='--', lw=2)
+#ax.grid('on', which='minor', axis='x' )
+
+dfDirectorsGcol = dfDirectorsG.transpose()
+ax2 = dfDirectorsGcol.loc[:, dfDirectorsGcol.columns != 'gender'].sum().plot.area()
+ax2.set_ylabel("Amount of total directorship positions")
+ax2.set_xlabel("Time")
+ax2.set_ylim(0,2300)
+ax2.axvline(pd.to_datetime('2008-01-01'), color='k', linestyle='--', lw=2)
+ax2.set_aspect(aspect=0.03)
+steelblue_patch = mpatches.Patch(label='Both genders')
+ax2.legend(handles=[steelblue_patch])
+#ax.grid('on', which='minor', axis='x' )
+
+# calculating the amount of directors per gender
+dfDirectorsG.transpose().groupby('gender').sum()
+   
+#Creating graph of growth of positions, composition per gender
+ax3 = dfDirectorsG.transpose().groupby('gender').sum().transpose().plot.area(color=['steelblue', 'lightskyblue' ])
+ax3.set_ylabel("Amount of positions, stacked")
+ax3.set_xlabel("Time")
+ax3.set_ylim(0,2300)
+ax3.axvline(pd.to_datetime('2008-01-01'), color='k', linestyle='--', lw=2)
+lighskyblue_patch = mpatches.Patch(color='lightskyblue', label='Female')
+steelblue_patch = mpatches.Patch(color='steelblue', label='Male')
+ax3.legend(handles=[steelblue_patch , lighskyblue_patch])
+#ax3.legend(["male", "female"], title='Gender')
+
+#calculating and creating graph with change of positions per gender, with lines indicating 40% and 60% of the total
+dfintermediate = dfDirectorsG.transpose().groupby('gender').sum().transpose()
+dfintermediate['40total'] = (dfintermediate.transpose().sum()) * 0.4
+dfintermediate['60total'] = (dfintermediate['40total']) * 1.5
+ax3 = dfintermediate.plot(color=['dodgerblue','darkorange','silver', 'silver'])
+ax3.set_ylabel("Amount of directorship positions")
+ax3.set_xlabel("Time")
+ax3.legend(["male", "female"], title='Gender')
+ax3.set_ylim(0,1600)
+ax3.axvline(pd.to_datetime('2008-01-01'), color='k', linestyle='--', lw=2)
+ax3.legend(["Male", "Female", "40% of total", "60% of total"]) #, title='Gender')
+
+
+###
+#PART5: Calculating the amount of positions per female, positions per male
+
+#thcreating a chart that shows the ratio of number of directorships  per person; only people who are having a position are counted in
+number_of_directorships = dfDirectors.transpose().sum(axis=0)
+number_of_people_directors = dfDirectors.transpose().astype(bool).sum(axis=0)
+ax4 = (number_of_directorships/number_of_people_directors).plot()
+ax4.set_ylabel("The golden skirts/pants ratio")
+
+#golden skirts effec, checking the ratio of positions per person, per gender
+number_of_directorships_per_gender = dfDirectorsG.transpose().groupby('gender').sum(axis=0)
+dfDirectorsGT = dfDirectorsG.transpose()
+number_of_people_directors_per_gender = dfDirectorsGT[(dfDirectorsGT != 0)].groupby('gender').count()
+ax5 = (number_of_directorships_per_gender/number_of_people_directors_per_gender).transpose().plot(color=['dodgerblue','darkorange'])
+(number_of_directorships/number_of_people_directors).plot(color=['lightgray'])
+ax5.set_ylabel("Ratio: Amount of directorships / Directors")
+ax5.set_xlabel("Time")
+ax5.axvline(pd.to_datetime('2008-01-01'), color='k', linestyle='--', lw=2)
+ax5.legend(["Male", "Female", "Both genders"], title='Gender')
+
+###
+#PART6: Creating networks per month
+
+#getting the list of people and their gender
+records = dfPpl[['id','gender']].to_records(index=False)
+genders = list(records)
+#print(genders)
+
+# convert numpy arrays into tuples 
+gend = tuple(map(tuple, genders)) 
+# print result 
+#print ("Resultant Array :"+str(gend)) 
+
+#create empty graph
+G0 = nx.Graph()
+#adding nodes and edges 112 times, for the 112 network graphs 
+for j in range(0,112): 
+    G112 = nx.Graph()
+    #G112.add_nodes_from(gend)
+    #print(G1.number_of_nodes())
+    for i in range(0, len(one_mode[j])):
+        #G1.add_edges_from(one_mode[0][i])
+        G112.add_edges_from(one_mode[j])
+      
+    #drawing every graph and saving it locally
+    nx.draw(G112, node_size=0.03)
+    plt.title(f'Month:{j}')
+    plt.savefig(f'nwgraph{j}.png', dpi=350, bbox_inches='tight')
+    plt.figure()
+
+
+#Creating a gif, to visualize the graphs over time
+images = []
+
+for i in range(0, 112):
+    filename = 'nwgraph{}.png'.format(i)
+    images.append(imageio.imread(filename))
+
+imageio.mimsave('nwoutput.gif', images, fps=10)
+        
